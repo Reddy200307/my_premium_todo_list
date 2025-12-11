@@ -4,7 +4,7 @@ A premium, modern To-Do list application built for Windows using Flutter.
 
 Designed with a focus on aesthetics and native integration, this app features a glassmorphic UI (Acrylic effects), smooth animations, and a hierarchical group-task structure to keep your day organized.
 
-![App Banner](screenshots/Screenshot1.png)
+![App Banner](screenshots/screenshot1.png)
 
 ## ✨ Features
 
@@ -23,7 +23,7 @@ Designed with a focus on aesthetics and native integration, this app features a 
 
 | Dashboard View | Add Task / Edit |
 |:---:|:---:|
-| ![Dashboard](screenshots/Screenshot1.png) |
+| ![Dashboard](screenshots/screenshot1.png) |
 | *View your groups and tasks* | *Intuitive dialogs for management* |
 
 ## 🛠️ Tech Stack & Dependencies
