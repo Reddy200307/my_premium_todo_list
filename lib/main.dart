@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_acrylic/flutter_acrylic.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:intl/intl.dart';
 import 'dart:convert';
 
 void main() async {
@@ -59,19 +60,27 @@ class TodoTask {
   String id;
   String title;
   bool isCompleted;
+  DateTime? dueDate;
 
-  TodoTask({required this.id, required this.title, this.isCompleted = false});
+  TodoTask({
+    required this.id,
+    required this.title,
+    this.isCompleted = false,
+    this.dueDate,
+  });
 
   Map<String, dynamic> toJson() => {
     'id': id,
     'title': title,
     'isCompleted': isCompleted,
+    'dueDate': dueDate?.toIso8601String(),
   };
 
   factory TodoTask.fromJson(Map<String, dynamic> json) => TodoTask(
     id: json['id'],
     title: json['title'],
     isCompleted: json['isCompleted'] ?? false,
+    dueDate: json['dueDate'] != null ? DateTime.parse(json['dueDate']) : null,
   );
 }
 
@@ -85,8 +94,8 @@ class _TodoAppState extends State<TodoApp> {
   TodoGroup? selectedGroup;
   TextEditingController groupController = TextEditingController();
   TextEditingController taskController = TextEditingController();
-  final GlobalKey<AnimatedListState> _groupsListKey = GlobalKey();
-  final GlobalKey<AnimatedListState> _tasksListKey = GlobalKey();
+  DateTime? selectedDueDate;
+  bool isLoading = true;
 
   @override
   void initState() {
@@ -109,7 +118,13 @@ class _TodoAppState extends State<TodoApp> {
             orElse: () =>
                 groups.isNotEmpty ? groups[0] : TodoGroup(id: '', name: ''),
           );
+          if (selectedGroup?.id == '') selectedGroup = null;
         }
+        isLoading = false;
+      });
+    } else {
+      setState(() {
+        isLoading = false;
       });
     }
   }
@@ -145,7 +160,7 @@ class _TodoAppState extends State<TodoApp> {
       builder: (context) => AlertDialog(
         backgroundColor: Colors.white,
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-        title: Text('Edit Group', style: TextStyle(fontFamily: 'DM Sans')),
+        title: Text('Edit Group'),
         content: TextField(
           controller: controller,
           decoration: InputDecoration(
@@ -157,7 +172,7 @@ class _TodoAppState extends State<TodoApp> {
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(context),
-            child: Text('Cancel', style: TextStyle(fontFamily: 'DM Sans')),
+            child: Text('Cancel'),
           ),
           TextButton(
             onPressed: () {
@@ -169,7 +184,7 @@ class _TodoAppState extends State<TodoApp> {
                 Navigator.pop(context);
               }
             },
-            child: Text('Save', style: TextStyle(fontFamily: 'DM Sans')),
+            child: Text('Save'),
           ),
         ],
       ),
@@ -183,14 +198,47 @@ class _TodoAppState extends State<TodoApp> {
     saveData();
   }
 
+  Future<void> pickDueDate() async {
+    final DateTime? picked = await showDatePicker(
+      context: context,
+      initialDate: selectedDueDate ?? DateTime.now(),
+      firstDate: DateTime.now(),
+      lastDate: DateTime.now().add(Duration(days: 365 * 2)),
+      builder: (context, child) {
+        return Theme(
+          data: Theme.of(context).copyWith(
+            colorScheme: ColorScheme.light(
+              primary: Colors.blue,
+              onPrimary: Colors.white,
+            ),
+          ),
+          child: child!,
+        );
+      },
+    );
+    if (picked != null) {
+      setState(() {
+        selectedDueDate = picked;
+      });
+    }
+  }
+
+  void clearDueDate() {
+    setState(() {
+      selectedDueDate = null;
+    });
+  }
+
   void addTask(String title) {
     if (title.trim().isEmpty || selectedGroup == null) return;
     final newTask = TodoTask(
       id: DateTime.now().millisecondsSinceEpoch.toString(),
       title: title,
+      dueDate: selectedDueDate,
     );
     setState(() {
       selectedGroup!.tasks.add(newTask);
+      selectedDueDate = null;
     });
     saveData();
     taskController.clear();
@@ -198,38 +246,92 @@ class _TodoAppState extends State<TodoApp> {
 
   void editTask(TodoTask task) {
     final controller = TextEditingController(text: task.title);
+    DateTime? editDueDate = task.dueDate;
+
     showDialog(
       context: context,
-      builder: (context) => AlertDialog(
-        backgroundColor: Colors.white,
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-        title: Text('Edit Task', style: TextStyle(fontFamily: 'DM Sans')),
-        content: TextField(
-          controller: controller,
-          decoration: InputDecoration(
-            hintText: 'Task title',
-            border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
+      builder: (context) => StatefulBuilder(
+        builder: (context, setDialogState) => AlertDialog(
+          backgroundColor: Colors.white,
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(16),
           ),
-          autofocus: true,
+          title: Text('Edit Task'),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              TextField(
+                controller: controller,
+                decoration: InputDecoration(
+                  hintText: 'Task title',
+                  border: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                ),
+                autofocus: true,
+              ),
+              SizedBox(height: 16),
+              Row(
+                children: [
+                  Expanded(
+                    child: OutlinedButton.icon(
+                      onPressed: () async {
+                        final picked = await showDatePicker(
+                          context: context,
+                          initialDate: editDueDate ?? DateTime.now(),
+                          firstDate: DateTime.now(),
+                          lastDate: DateTime.now().add(Duration(days: 365 * 2)),
+                        );
+                        if (picked != null) {
+                          setDialogState(() {
+                            editDueDate = picked;
+                          });
+                        }
+                      },
+                      icon: Icon(Icons.calendar_today, size: 18),
+                      label: Text(
+                        editDueDate != null
+                            ? DateFormat('MMM dd, yyyy').format(editDueDate!)
+                            : 'Set Due Date',
+                        style: TextStyle(fontSize: 12),
+                      ),
+                    ),
+                  ),
+                  if (editDueDate != null) ...[
+                    SizedBox(width: 8),
+                    IconButton(
+                      icon: Icon(Icons.clear, size: 20),
+                      onPressed: () {
+                        setDialogState(() {
+                          editDueDate = null;
+                        });
+                      },
+                    ),
+                  ],
+                ],
+              ),
+            ],
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context),
+              child: Text('Cancel'),
+            ),
+            TextButton(
+              onPressed: () {
+                if (controller.text.trim().isNotEmpty) {
+                  setState(() {
+                    task.title = controller.text.trim();
+                    task.dueDate = editDueDate;
+                  });
+                  saveData();
+                  Navigator.pop(context);
+                }
+              },
+              child: Text('Save'),
+            ),
+          ],
         ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: Text('Cancel', style: TextStyle(fontFamily: 'DM Sans')),
-          ),
-          TextButton(
-            onPressed: () {
-              if (controller.text.trim().isNotEmpty) {
-                setState(() {
-                  task.title = controller.text.trim();
-                });
-                saveData();
-                Navigator.pop(context);
-              }
-            },
-            child: Text('Save', style: TextStyle(fontFamily: 'DM Sans')),
-          ),
-        ],
       ),
     );
   }
@@ -242,7 +344,6 @@ class _TodoAppState extends State<TodoApp> {
   }
 
   void deleteGroup(TodoGroup group) {
-    final index = groups.indexOf(group);
     setState(() {
       groups.remove(group);
       if (selectedGroup?.id == group.id) {
@@ -259,8 +360,43 @@ class _TodoAppState extends State<TodoApp> {
     saveData();
   }
 
+  String formatDueDate(DateTime date) {
+    final now = DateTime.now();
+    final today = DateTime(now.year, now.month, now.day);
+    final tomorrow = today.add(Duration(days: 1));
+    final taskDate = DateTime(date.year, date.month, date.day);
+
+    if (taskDate == today) {
+      return 'Today';
+    } else if (taskDate == tomorrow) {
+      return 'Tomorrow';
+    } else if (taskDate.isBefore(today)) {
+      return 'Overdue';
+    } else {
+      return DateFormat('MMM dd').format(date);
+    }
+  }
+
+  Color getDueDateColor(DateTime date) {
+    final now = DateTime.now();
+    final today = DateTime(now.year, now.month, now.day);
+    final taskDate = DateTime(date.year, date.month, date.day);
+
+    if (taskDate.isBefore(today)) {
+      return Colors.red;
+    } else if (taskDate == today) {
+      return Colors.orange;
+    } else {
+      return Colors.blue;
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
+    if (isLoading) {
+      return Scaffold(body: Center(child: CircularProgressIndicator()));
+    }
+
     return Scaffold(
       body: Row(
         children: [
@@ -315,7 +451,6 @@ class _TodoAppState extends State<TodoApp> {
                                 fontSize: 28,
                                 fontWeight: FontWeight.bold,
                                 color: Colors.black87,
-                                fontFamily: 'DM Sans',
                               ),
                             ),
                             Text(
@@ -323,7 +458,6 @@ class _TodoAppState extends State<TodoApp> {
                               style: TextStyle(
                                 fontSize: 13,
                                 color: Colors.black54,
-                                fontFamily: 'DM Sans',
                               ),
                             ),
                           ],
@@ -356,14 +490,10 @@ class _TodoAppState extends State<TodoApp> {
                         Expanded(
                           child: TextField(
                             controller: groupController,
-                            style: TextStyle(fontFamily: 'DM Sans'),
                             decoration: InputDecoration(
                               hintText: 'Add a new group...',
                               border: InputBorder.none,
-                              hintStyle: TextStyle(
-                                color: Colors.black26,
-                                fontFamily: 'DM Sans',
-                              ),
+                              hintStyle: TextStyle(color: Colors.black26),
                             ),
                             onSubmitted: addGroup,
                           ),
@@ -384,7 +514,6 @@ class _TodoAppState extends State<TodoApp> {
                                 style: TextStyle(
                                   color: Colors.white,
                                   fontWeight: FontWeight.w600,
-                                  fontFamily: 'DM Sans',
                                 ),
                               ),
                             ),
@@ -400,119 +529,121 @@ class _TodoAppState extends State<TodoApp> {
 
                 // Groups List
                 Expanded(
-                  child: ListView.builder(
-                    padding: EdgeInsets.symmetric(horizontal: 16),
-                    itemCount: groups.length,
-                    itemBuilder: (context, index) {
-                      final group = groups[index];
-                      final isSelected = selectedGroup?.id == group.id;
-                      final completedTasks = group.tasks
-                          .where((t) => t.isCompleted)
-                          .length;
-
-                      return TweenAnimationBuilder<double>(
-                        tween: Tween(begin: 0.0, end: 1.0),
-                        duration: Duration(milliseconds: 300),
-                        curve: Curves.easeOutCubic,
-                        builder: (context, value, child) {
-                          return Transform.scale(
-                            scale: value,
-                            child: Opacity(opacity: value, child: child),
-                          );
-                        },
-                        child: Padding(
-                          padding: EdgeInsets.only(bottom: 12),
-                          child: Material(
-                            color: isSelected
-                                ? Colors.blue.withOpacity(0.1)
-                                : Colors.white,
-                            borderRadius: BorderRadius.circular(16),
-                            child: InkWell(
-                              onTap: () => selectGroup(group),
-                              borderRadius: BorderRadius.circular(16),
-                              child: AnimatedContainer(
-                                duration: Duration(milliseconds: 200),
-                                padding: EdgeInsets.all(16),
-                                decoration: BoxDecoration(
-                                  borderRadius: BorderRadius.circular(16),
-                                  border: Border.all(
-                                    color: isSelected
-                                        ? Colors.blue.withOpacity(0.3)
-                                        : Colors.transparent,
-                                    width: 2,
-                                  ),
-                                  boxShadow: [
-                                    BoxShadow(
-                                      color: Colors.black12,
-                                      blurRadius: 8,
-                                      offset: Offset(0, 2),
-                                    ),
-                                  ],
-                                ),
-                                child: Row(
-                                  children: [
-                                    Container(
-                                      width: 48,
-                                      height: 48,
-                                      decoration: BoxDecoration(
-                                        color: Colors.blue,
-                                        borderRadius: BorderRadius.circular(12),
-                                      ),
-                                      child: Icon(
-                                        Icons.folder,
-                                        color: Colors.white,
-                                        size: 24,
-                                      ),
-                                    ),
-                                    SizedBox(width: 12),
-                                    Expanded(
-                                      child: Column(
-                                        crossAxisAlignment:
-                                            CrossAxisAlignment.start,
-                                        children: [
-                                          Text(
-                                            group.name,
-                                            style: TextStyle(
-                                              fontSize: 18,
-                                              fontWeight: FontWeight.w600,
-                                              color: Colors.black87,
-                                              fontFamily: 'DM Sans',
-                                            ),
-                                          ),
-                                          Text(
-                                            '$completedTasks of ${group.tasks.length} tasks',
-                                            style: TextStyle(
-                                              fontSize: 13,
-                                              color: Colors.black54,
-                                              fontFamily: 'DM Sans',
-                                            ),
-                                          ),
-                                        ],
-                                      ),
-                                    ),
-                                    IconButton(
-                                      icon: Icon(
-                                        Icons.edit_outlined,
-                                        color: Colors.blue.withOpacity(0.7),
-                                      ),
-                                      onPressed: () => editGroup(group),
-                                    ),
-                                    IconButton(
-                                      icon: Icon(
-                                        Icons.delete_outline,
-                                        color: Colors.red.withOpacity(0.7),
-                                      ),
-                                      onPressed: () => deleteGroup(group),
-                                    ),
-                                  ],
-                                ),
+                  child: groups.isEmpty
+                      ? Center(
+                          child: Padding(
+                            padding: EdgeInsets.all(24),
+                            child: Text(
+                              'Create your first group to get started!',
+                              textAlign: TextAlign.center,
+                              style: TextStyle(
+                                fontSize: 16,
+                                color: Colors.black54,
                               ),
                             ),
                           ),
+                        )
+                      : ListView.builder(
+                          padding: EdgeInsets.symmetric(horizontal: 16),
+                          itemCount: groups.length,
+                          itemBuilder: (context, index) {
+                            final group = groups[index];
+                            final isSelected = selectedGroup?.id == group.id;
+                            final completedTasks = group.tasks
+                                .where((t) => t.isCompleted)
+                                .length;
+
+                            return Padding(
+                              padding: EdgeInsets.only(bottom: 12),
+                              child: Material(
+                                color: isSelected
+                                    ? Colors.blue.withOpacity(0.1)
+                                    : Colors.white,
+                                borderRadius: BorderRadius.circular(16),
+                                child: InkWell(
+                                  onTap: () => selectGroup(group),
+                                  borderRadius: BorderRadius.circular(16),
+                                  child: Container(
+                                    padding: EdgeInsets.all(16),
+                                    decoration: BoxDecoration(
+                                      borderRadius: BorderRadius.circular(16),
+                                      border: Border.all(
+                                        color: isSelected
+                                            ? Colors.blue.withOpacity(0.3)
+                                            : Colors.transparent,
+                                        width: 2,
+                                      ),
+                                      boxShadow: [
+                                        BoxShadow(
+                                          color: Colors.black12,
+                                          blurRadius: 8,
+                                          offset: Offset(0, 2),
+                                        ),
+                                      ],
+                                    ),
+                                    child: Row(
+                                      children: [
+                                        Container(
+                                          width: 48,
+                                          height: 48,
+                                          decoration: BoxDecoration(
+                                            color: Colors.blue,
+                                            borderRadius: BorderRadius.circular(
+                                              12,
+                                            ),
+                                          ),
+                                          child: Icon(
+                                            Icons.folder,
+                                            color: Colors.white,
+                                            size: 24,
+                                          ),
+                                        ),
+                                        SizedBox(width: 12),
+                                        Expanded(
+                                          child: Column(
+                                            crossAxisAlignment:
+                                                CrossAxisAlignment.start,
+                                            children: [
+                                              Text(
+                                                group.name,
+                                                style: TextStyle(
+                                                  fontSize: 18,
+                                                  fontWeight: FontWeight.w600,
+                                                  color: Colors.black87,
+                                                ),
+                                              ),
+                                              Text(
+                                                '$completedTasks of ${group.tasks.length} tasks',
+                                                style: TextStyle(
+                                                  fontSize: 13,
+                                                  color: Colors.black54,
+                                                ),
+                                              ),
+                                            ],
+                                          ),
+                                        ),
+                                        IconButton(
+                                          icon: Icon(
+                                            Icons.edit_outlined,
+                                            color: Colors.blue.withOpacity(0.7),
+                                          ),
+                                          onPressed: () => editGroup(group),
+                                        ),
+                                        IconButton(
+                                          icon: Icon(
+                                            Icons.delete_outline,
+                                            color: Colors.red.withOpacity(0.7),
+                                          ),
+                                          onPressed: () => deleteGroup(group),
+                                        ),
+                                      ],
+                                    ),
+                                  ),
+                                ),
+                              ),
+                            );
+                          },
                         ),
-                      );
-                    },
-                  ),
                 ),
               ],
             ),
@@ -544,7 +675,6 @@ class _TodoAppState extends State<TodoApp> {
                             style: TextStyle(
                               fontSize: 18,
                               color: Colors.black38,
-                              fontFamily: 'DM Sans',
                             ),
                           ),
                         ],
@@ -597,7 +727,6 @@ class _TodoAppState extends State<TodoApp> {
                                         fontSize: 28,
                                         fontWeight: FontWeight.bold,
                                         color: Colors.black87,
-                                        fontFamily: 'DM Sans',
                                       ),
                                     ),
                                     Text(
@@ -605,7 +734,6 @@ class _TodoAppState extends State<TodoApp> {
                                       style: TextStyle(
                                         fontSize: 13,
                                         color: Colors.black54,
-                                        fontFamily: 'DM Sans',
                                       ),
                                     ),
                                   ],
@@ -642,17 +770,64 @@ class _TodoAppState extends State<TodoApp> {
                                 Expanded(
                                   child: TextField(
                                     controller: taskController,
-                                    style: TextStyle(fontFamily: 'DM Sans'),
                                     decoration: InputDecoration(
                                       hintText: 'Add a new task...',
                                       border: InputBorder.none,
                                       hintStyle: TextStyle(
                                         color: Colors.black26,
-                                        fontFamily: 'DM Sans',
                                       ),
                                     ),
                                     onSubmitted: addTask,
                                   ),
+                                ),
+                                if (selectedDueDate != null)
+                                  Container(
+                                    padding: EdgeInsets.symmetric(
+                                      horizontal: 12,
+                                      vertical: 6,
+                                    ),
+                                    decoration: BoxDecoration(
+                                      color: Colors.blue.withOpacity(0.1),
+                                      borderRadius: BorderRadius.circular(8),
+                                    ),
+                                    child: Row(
+                                      children: [
+                                        Icon(
+                                          Icons.calendar_today,
+                                          size: 14,
+                                          color: Colors.blue,
+                                        ),
+                                        SizedBox(width: 4),
+                                        Text(
+                                          DateFormat(
+                                            'MMM dd',
+                                          ).format(selectedDueDate!),
+                                          style: TextStyle(
+                                            fontSize: 12,
+                                            color: Colors.blue,
+                                          ),
+                                        ),
+                                        SizedBox(width: 4),
+                                        InkWell(
+                                          onTap: clearDueDate,
+                                          child: Icon(
+                                            Icons.close,
+                                            size: 14,
+                                            color: Colors.blue,
+                                          ),
+                                        ),
+                                      ],
+                                    ),
+                                  ),
+                                IconButton(
+                                  icon: Icon(
+                                    Icons.calendar_today,
+                                    size: 20,
+                                    color: selectedDueDate != null
+                                        ? Colors.blue
+                                        : Colors.black38,
+                                  ),
+                                  onPressed: pickDueDate,
                                 ),
                                 Material(
                                   color: Colors.blue,
@@ -670,7 +845,6 @@ class _TodoAppState extends State<TodoApp> {
                                         style: TextStyle(
                                           color: Colors.white,
                                           fontWeight: FontWeight.w600,
-                                          fontFamily: 'DM Sans',
                                         ),
                                       ),
                                     ),
@@ -686,121 +860,157 @@ class _TodoAppState extends State<TodoApp> {
 
                         // Tasks List
                         Expanded(
-                          child: ListView.builder(
-                            padding: EdgeInsets.symmetric(horizontal: 24),
-                            itemCount: selectedGroup!.tasks.length,
-                            itemBuilder: (context, index) {
-                              final task = selectedGroup!.tasks[index];
-                              return TweenAnimationBuilder<double>(
-                                tween: Tween(begin: 0.0, end: 1.0),
-                                duration: Duration(milliseconds: 300),
-                                curve: Curves.easeOutCubic,
-                                builder: (context, value, child) {
-                                  return Transform.translate(
-                                    offset: Offset(50 * (1 - value), 0),
-                                    child: Opacity(
-                                      opacity: value,
-                                      child: child,
+                          child: selectedGroup!.tasks.isEmpty
+                              ? Center(
+                                  child: Text(
+                                    'No tasks yet. Add one above!',
+                                    style: TextStyle(
+                                      fontSize: 16,
+                                      color: Colors.black38,
                                     ),
-                                  );
-                                },
-                                child: Padding(
-                                  padding: EdgeInsets.only(bottom: 12),
-                                  child: Container(
-                                    decoration: BoxDecoration(
-                                      color: Colors.white,
-                                      borderRadius: BorderRadius.circular(16),
-                                      boxShadow: [
-                                        BoxShadow(
-                                          color: Colors.black12,
-                                          blurRadius: 8,
-                                          offset: Offset(0, 2),
+                                  ),
+                                )
+                              : ListView.builder(
+                                  padding: EdgeInsets.symmetric(horizontal: 24),
+                                  itemCount: selectedGroup!.tasks.length,
+                                  itemBuilder: (context, index) {
+                                    final task = selectedGroup!.tasks[index];
+                                    return Padding(
+                                      padding: EdgeInsets.only(bottom: 12),
+                                      child: Container(
+                                        decoration: BoxDecoration(
+                                          color: Colors.white,
+                                          borderRadius: BorderRadius.circular(
+                                            16,
+                                          ),
+                                          boxShadow: [
+                                            BoxShadow(
+                                              color: Colors.black12,
+                                              blurRadius: 8,
+                                              offset: Offset(0, 2),
+                                            ),
+                                          ],
                                         ),
-                                      ],
-                                    ),
-                                    child: Material(
-                                      color: Colors.transparent,
-                                      child: InkWell(
-                                        onTap: () => toggleTask(task),
-                                        borderRadius: BorderRadius.circular(16),
-                                        child: Padding(
-                                          padding: EdgeInsets.all(16),
-                                          child: Row(
-                                            children: [
-                                              AnimatedContainer(
-                                                duration: Duration(
-                                                  milliseconds: 200,
-                                                ),
-                                                width: 32,
-                                                height: 32,
-                                                decoration: BoxDecoration(
-                                                  shape: BoxShape.circle,
-                                                  border: Border.all(
-                                                    color: task.isCompleted
-                                                        ? Colors.green
-                                                        : Colors.blue,
-                                                    width: 2.5,
-                                                  ),
-                                                  color: task.isCompleted
-                                                      ? Colors.green
-                                                      : Colors.transparent,
-                                                ),
-                                                child: task.isCompleted
-                                                    ? Icon(
-                                                        Icons.check,
-                                                        color: Colors.white,
-                                                        size: 18,
-                                                      )
-                                                    : null,
-                                              ),
-                                              SizedBox(width: 16),
-                                              Expanded(
-                                                child: AnimatedDefaultTextStyle(
-                                                  duration: Duration(
-                                                    milliseconds: 200,
-                                                  ),
-                                                  style: TextStyle(
-                                                    fontSize: 16,
-                                                    color: task.isCompleted
-                                                        ? Colors.black38
-                                                        : Colors.black87,
-                                                    decoration: task.isCompleted
-                                                        ? TextDecoration
-                                                              .lineThrough
+                                        child: Material(
+                                          color: Colors.transparent,
+                                          child: InkWell(
+                                            onTap: () => toggleTask(task),
+                                            borderRadius: BorderRadius.circular(
+                                              16,
+                                            ),
+                                            child: Padding(
+                                              padding: EdgeInsets.all(16),
+                                              child: Row(
+                                                children: [
+                                                  Container(
+                                                    width: 32,
+                                                    height: 32,
+                                                    decoration: BoxDecoration(
+                                                      shape: BoxShape.circle,
+                                                      border: Border.all(
+                                                        color: task.isCompleted
+                                                            ? Colors.green
+                                                            : Colors.blue,
+                                                        width: 2.5,
+                                                      ),
+                                                      color: task.isCompleted
+                                                          ? Colors.green
+                                                          : Colors.transparent,
+                                                    ),
+                                                    child: task.isCompleted
+                                                        ? Icon(
+                                                            Icons.check,
+                                                            color: Colors.white,
+                                                            size: 18,
+                                                          )
                                                         : null,
-                                                    fontFamily: 'DM Sans',
                                                   ),
-                                                  child: Text(task.title),
-                                                ),
-                                              ),
-                                              IconButton(
-                                                icon: Icon(
-                                                  Icons.edit_outlined,
-                                                  color: Colors.blue
-                                                      .withOpacity(0.7),
-                                                ),
-                                                onPressed: () => editTask(task),
-                                              ),
-                                              IconButton(
-                                                icon: Icon(
-                                                  Icons.delete_outline,
-                                                  color: Colors.red.withOpacity(
-                                                    0.7,
+                                                  SizedBox(width: 16),
+                                                  Expanded(
+                                                    child: Column(
+                                                      crossAxisAlignment:
+                                                          CrossAxisAlignment
+                                                              .start,
+                                                      children: [
+                                                        Text(
+                                                          task.title,
+                                                          style: TextStyle(
+                                                            fontSize: 16,
+                                                            color:
+                                                                task.isCompleted
+                                                                ? Colors.black38
+                                                                : Colors
+                                                                      .black87,
+                                                            decoration:
+                                                                task.isCompleted
+                                                                ? TextDecoration
+                                                                      .lineThrough
+                                                                : null,
+                                                          ),
+                                                        ),
+                                                        if (task.dueDate !=
+                                                            null) ...[
+                                                          SizedBox(height: 4),
+                                                          Row(
+                                                            children: [
+                                                              Icon(
+                                                                Icons
+                                                                    .calendar_today,
+                                                                size: 12,
+                                                                color: getDueDateColor(
+                                                                  task.dueDate!,
+                                                                ),
+                                                              ),
+                                                              SizedBox(
+                                                                width: 4,
+                                                              ),
+                                                              Text(
+                                                                formatDueDate(
+                                                                  task.dueDate!,
+                                                                ),
+                                                                style: TextStyle(
+                                                                  fontSize: 12,
+                                                                  color: getDueDateColor(
+                                                                    task.dueDate!,
+                                                                  ),
+                                                                  fontWeight:
+                                                                      FontWeight
+                                                                          .w500,
+                                                                ),
+                                                              ),
+                                                            ],
+                                                          ),
+                                                        ],
+                                                      ],
+                                                    ),
                                                   ),
-                                                ),
-                                                onPressed: () =>
-                                                    deleteTask(task),
+                                                  IconButton(
+                                                    icon: Icon(
+                                                      Icons.edit_outlined,
+                                                      color: Colors.blue
+                                                          .withOpacity(0.7),
+                                                    ),
+                                                    onPressed: () =>
+                                                        editTask(task),
+                                                  ),
+                                                  IconButton(
+                                                    icon: Icon(
+                                                      Icons.delete_outline,
+                                                      color: Colors.red
+                                                          .withOpacity(0.7),
+                                                    ),
+                                                    onPressed: () =>
+                                                        deleteTask(task),
+                                                  ),
+                                                ],
                                               ),
-                                            ],
+                                            ),
                                           ),
                                         ),
                                       ),
-                                    ),
-                                  ),
+                                    );
+                                  },
                                 ),
-                              );
-                            },
-                          ),
                         ),
                       ],
                     ),
@@ -809,5 +1019,12 @@ class _TodoAppState extends State<TodoApp> {
         ],
       ),
     );
+  }
+
+  @override
+  void dispose() {
+    groupController.dispose();
+    taskController.dispose();
+    super.dispose();
   }
 }
