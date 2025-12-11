@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_acrylic/flutter_acrylic.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -9,15 +11,83 @@ void main() async {
 
   // Enable Windows 10 acrylic transparency
   await Window.initialize();
-  await Window.setEffect(
-    effect: WindowEffect.acrylic,
-    color: Color(0x00000000),
-  );
+  await Window.setEffect(effect: WindowEffect.mica, dark: true);
 
   runApp(MyApp());
 }
 
+// Add this class to your code
+class PremiumIconPainter extends CustomPainter {
+  @override
+  void paint(Canvas canvas, Size size) {
+    // 1. Draw Glass Background
+    final rect = Rect.fromLTWH(0, 0, size.width, size.height);
+    final rrect = RRect.fromRectAndRadius(
+      rect,
+      Radius.circular(size.width * 0.2),
+    );
+
+    final bgPaint = Paint()
+      ..shader = LinearGradient(
+        begin: Alignment.topLeft,
+        end: Alignment.bottomRight,
+        colors: [Colors.white.withOpacity(0.4), Colors.white.withOpacity(0.1)],
+      ).createShader(rect);
+
+    // Add shadow
+    canvas.drawShadow(
+      Path()..addRRect(rrect),
+      Colors.black.withOpacity(0.2),
+      15,
+      true,
+    );
+    canvas.drawRRect(rrect, bgPaint);
+
+    // 2. Draw Border
+    final borderPaint = Paint()
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = 2
+      ..shader = LinearGradient(
+        begin: Alignment.topLeft,
+        end: Alignment.bottomRight,
+        colors: [Colors.white.withOpacity(0.6), Colors.white.withOpacity(0.1)],
+      ).createShader(rect);
+
+    canvas.drawRRect(rrect, borderPaint);
+
+    // 3. Draw Checkmark
+    final checkPath = Path();
+    // Coordinates relative to 100x100 box
+    checkPath.moveTo(size.width * 0.28, size.height * 0.52);
+    checkPath.lineTo(size.width * 0.42, size.height * 0.66);
+    checkPath.lineTo(size.width * 0.72, size.height * 0.34);
+
+    final checkPaint = Paint()
+      ..style = PaintingStyle.stroke
+      ..strokeCap = StrokeCap.round
+      ..strokeJoin = StrokeJoin.round
+      ..strokeWidth = size.width * 0.12
+      ..shader = LinearGradient(
+        colors: [Color(0xFFFFB74D), Color(0xFFEF6C00)],
+      ).createShader(rect);
+
+    // Add checkmark glow
+    canvas.drawPath(
+      checkPath,
+      checkPaint..maskFilter = MaskFilter.blur(BlurStyle.normal, 5),
+    );
+    // Draw actual checkmark
+    checkPaint.maskFilter = null;
+    canvas.drawPath(checkPath, checkPaint);
+  }
+
+  @override
+  bool shouldRepaint(covariant CustomPainter oldDelegate) => false;
+}
+
 class MyApp extends StatelessWidget {
+  const MyApp({super.key});
+
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
@@ -91,6 +161,7 @@ class TodoApp extends StatefulWidget {
 
 class _TodoAppState extends State<TodoApp> {
   List<TodoGroup> groups = [];
+  Timer? _saveDebouncer;
   TodoGroup? selectedGroup;
   TextEditingController groupController = TextEditingController();
   TextEditingController taskController = TextEditingController();
@@ -130,14 +201,20 @@ class _TodoAppState extends State<TodoApp> {
   }
 
   Future<void> saveData() async {
-    final prefs = await SharedPreferences.getInstance();
-    final String groupsJson = json.encode(
-      groups.map((g) => g.toJson()).toList(),
-    );
-    await prefs.setString('groups', groupsJson);
-    if (selectedGroup != null) {
-      await prefs.setString('selectedGroupId', selectedGroup!.id);
-    }
+    // Cancel previous timer (Debounce)
+    if (_saveDebouncer?.isActive ?? false) _saveDebouncer!.cancel();
+
+    // Wait 500ms before writing to disk
+    _saveDebouncer = Timer(const Duration(milliseconds: 500), () async {
+      final prefs = await SharedPreferences.getInstance();
+      final String groupsJson = json.encode(
+        groups.map((g) => g.toJson()).toList(),
+      );
+      await prefs.setString('groups', groupsJson);
+      if (selectedGroup != null) {
+        await prefs.setString('selectedGroupId', selectedGroup!.id);
+      }
+    });
   }
 
   void addGroup(String name) {
@@ -664,10 +741,10 @@ class _TodoAppState extends State<TodoApp> {
                       child: Column(
                         mainAxisAlignment: MainAxisAlignment.center,
                         children: [
-                          Icon(
-                            Icons.folder_open,
-                            size: 80,
-                            color: Colors.black12,
+                          SizedBox(
+                            width: 120,
+                            height: 120,
+                            child: CustomPaint(painter: PremiumIconPainter()),
                           ),
                           SizedBox(height: 16),
                           Text(
